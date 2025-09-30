@@ -103,6 +103,10 @@ class TreeParser:
             data = json.load(file_meta)
 
         headings = data['table_of_contents']
+        
+        if not headings:
+            logger.warning("No headings detected in PDF: %s", filename)
+            return
         if self.detect_level(headings):
             self.generate_toc_using_level(filename, headings)
         else:
