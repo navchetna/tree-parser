@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tree-parser"          # distribution name (what you pip install)
+version = "0.1.0"
+description = "Standalone tree parsing utilities"
+authors = [{ name="navchetna"}]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pdfminer==20191125",
+    "sortedcontainers==2.4.0",
+    "marker-pdf @ git+https://github.com/navchetna/marker.git",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
