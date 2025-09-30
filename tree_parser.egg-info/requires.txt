@@ -1,3 +1,0 @@
-pdfminer==20191125
-sortedcontainers==2.4.0
-marker-pdf@ git+https://github.com/navchetna/marker.git
