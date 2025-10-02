@@ -14,7 +14,6 @@ from tree_parser.text import Text
 from tree_parser.table import Table
 from tree_parser.utils import mkdirIfNotExists
 
-OUTPUT_DIR = ".outputs/"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,17 +23,20 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
 class TreeParser:
-    def __init__(self):
-        mkdirIfNotExists(OUTPUT_DIR)
+    def __init__(self, user_param: str):
+        # User-specific output directory
+        self.OUTPUT_DIR = os.path.join(user_param, "outputs")
+        mkdirIfNotExists(self.OUTPUT_DIR)
 
     def get_filename(self, file):
         return os.path.splitext(os.path.basename(file))[0]
 
     def generate_markdown(self, file, filename, converter):
-        if not output_exists(os.path.join(OUTPUT_DIR, filename), filename):
+        if not output_exists(os.path.join(self.OUTPUT_DIR, filename), filename):
             rendered = converter(file)
-            output_path = os.path.join(OUTPUT_DIR, filename)
+            output_path = os.path.join(self.OUTPUT_DIR, filename)
             os.mkdir(output_path)
             save_output(rendered, output_path, filename)
             logger.info(f"Saved markdown to {output_path}")
@@ -47,7 +49,7 @@ class TreeParser:
         return False
     
     def generate_toc_using_level(self, filename, headings):
-        output_path = os.path.join(OUTPUT_DIR, filename, 'toc.txt')
+        output_path = os.path.join(self.OUTPUT_DIR, filename, 'toc.txt')
         with open(output_path, 'w') as file_toc:
 
             level_pattern = re.compile(r'^\d+(\.\d+)*\.?\s')
@@ -61,9 +63,7 @@ class TreeParser:
         logger.info(f"Saved TOC to {output_path}")
 
     def generate_toc_using_size(self, filename, headings):
-
-        with open(os.path.join(OUTPUT_DIR, filename, 'toc.txt'), 'w') as file:
-
+        with open(os.path.join(self.OUTPUT_DIR, filename, 'toc.txt'), 'w') as file:
             dictLevel = SortedDict()
             list_headings = []
 
@@ -99,7 +99,7 @@ class TreeParser:
                 file.write(f"{i[1]};{i[2]};;;\n")
 
     def generate_toc_no_outline(self, filename):
-        with open(os.path.join(OUTPUT_DIR, filename, filename + "_meta.json"), 'r') as file_meta:
+        with open(os.path.join(self.OUTPUT_DIR, filename, filename + "_meta.json"), 'r') as file_meta:
             data = json.load(file_meta)
 
         headings = data['table_of_contents']
@@ -115,7 +115,7 @@ class TreeParser:
     def generate_toc(self, file, filename):
         if "grade" in filename:
             return
-        with open(os.path.join(OUTPUT_DIR, filename, 'toc.txt'), 'w') as file_toc:
+        with open(os.path.join(self.OUTPUT_DIR, filename, 'toc.txt'), 'w') as file_toc:
             with open(file, "rb") as fp:
                 try:
                     parser = PDFParser(fp)
@@ -138,20 +138,15 @@ class TreeParser:
         return line, line_2
 
     def parse_markdown(self, filename, rootNode, recentNodeDict):
-        toc_file = None
-
-        toc_file = open(os.path.join(OUTPUT_DIR, filename, "toc.txt"), "r")
+        toc_file = open(os.path.join(self.OUTPUT_DIR, filename, "toc.txt"), "r")
         toc_line = toc_file.readline()
                 
         currNode = rootNode
-
         tables = []
-
         content = ""
-
         previous_line = ""
 
-        with open(os.path.join(OUTPUT_DIR, filename, filename + ".md"), 'r') as markdown_file:
+        with open(os.path.join(self.OUTPUT_DIR, filename, filename + ".md"), 'r') as markdown_file:
             line = markdown_file.readline()
             while line:
                 line = re.sub(r'<span[^>]*?\/?>(</span>)?', '', line)
@@ -169,7 +164,7 @@ class TreeParser:
                         toc_line = toc_file.readline()
                         level, heading_toc = toc_line.split(";")
                     elif SequenceMatcher(None, heading.lower(), heading_toc.lower()).ratio() > 0.6:
-                        node = Node(level, heading, os.path.join(OUTPUT_DIR, filename))
+                        node = Node(level, heading, os.path.join(self.OUTPUT_DIR, filename))
                         if level > currNode.get_level():
                             currNode.append_child(node)
                             node.set_parent(currNode)
@@ -193,8 +188,7 @@ class TreeParser:
                     else:
                         content += line    
                 elif line[0] == '|':
-                    table_list = []
-                    table_list.append(line)
+                    table_list = [line]
                     while self.peek_next_lines(markdown_file)[0] and self.peek_next_lines(markdown_file)[0][0] == '|':
                         line = markdown_file.readline()
                         table_list.append(line)
@@ -230,30 +224,26 @@ class TreeParser:
             logger.warning("PDF not parsed accurately")
 
     def traverse_tree_text(self, node):
-        if node == None:
+        if node is None:
             return
         
         node.output_node_info()
-
         total = node.get_length_children()
-
         for i in range(total):
             self.traverse_tree_text(node.get_child(i))
         
     def generate_output_text(self, tree):
         filename = self.get_filename(tree.file)
-        with open(os.path.join(OUTPUT_DIR, filename, "output.txt"), "w") as f:
+        with open(os.path.join(self.OUTPUT_DIR, filename, "output.txt"), "w") as f:
             f.write("")
         self.traverse_tree_text(tree.rootNode)
 
     def traverse_tree_json(self, node):
-        if node == None:
+        if node is None:
             return
         
         data = {}
-
         heading = node.get_heading()
-
         data[heading] = {}
         data[heading]['content'] = []
 
@@ -267,7 +257,6 @@ class TreeParser:
         data[heading]['children'] = []
         
         total = node.get_length_children()
-
         for i in range(total):
             data[heading]['children'].append(self.traverse_tree_json(node.get_child(i)))
         
@@ -276,7 +265,7 @@ class TreeParser:
     def generate_output_json(self, tree):
         data = self.traverse_tree_json(tree.rootNode)
         filename = self.get_filename(tree.file)
-        output_path = os.path.join(OUTPUT_DIR, filename, "output_tree.json")
+        output_path = os.path.join(self.OUTPUT_DIR, filename, "output_tree.json")
 
         with open(output_path, "w") as outfile: 
             json.dump(data, outfile)
@@ -296,4 +285,4 @@ class TreeParser:
     
     def get_output_path(self, tree):
         filename = self.get_filename(tree.file)
-        return os.path.join(OUTPUT_DIR, filename, "output.txt")
+        return os.path.join(self.OUTPUT_DIR, filename, "output.txt")
