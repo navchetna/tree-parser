@@ -276,7 +276,7 @@ class TreeParser:
     def generate_output_json(self, tree):
         data = self.traverse_tree_json(tree.rootNode)
         filename = self.get_filename(tree.file)
-        output_path = os.path.join(OUTPUT_DIR, filename, "output.json")
+        output_path = os.path.join(OUTPUT_DIR, filename, "output_tree.json")
 
         with open(output_path, "w") as outfile: 
             json.dump(data, outfile)
