@@ -13,8 +13,7 @@ from tree_parser.node import Node
 
 class Tree:
     def __init__(self, file, user_param: str):
-        # Make user-specific output directory
-        output_dir = os.path.join("results", user_param, "outputs")
+        output_dir = os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
         os.makedirs(output_dir, exist_ok=True)
 
         self.rootNode = Node(

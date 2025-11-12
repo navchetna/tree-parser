@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class TreeParser:
     def __init__(self, user_param: str):
         # User-specific output directory
-        self.OUTPUT_DIR = os.path.join("results", user_param, "outputs")
+        self.OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
         mkdirIfNotExists(self.OUTPUT_DIR)
 
     def get_filename(self, file):
