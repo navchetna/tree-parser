@@ -153,13 +153,18 @@ class TreeParser:
                 if line == "\n":
                     line = markdown_file.readline()
                     continue
-                if bool(re.match(r'^#+', line)):
-                    _, heading = line.split(" ", 1)
+                # if bool(re.match(r'^#+', line)):
+                #     _, heading = line.split(" ", 1)
+                heading_regex = re.compile(r'^(#{1,6})\s+(.+)')
+                match = heading_regex.match(line)
+                if match:
+                    heading_level = len(match.group(1))
+                    heading_text = match.group(2).strip()
                     if not toc_line:
                         line = markdown_file.readline()
                         continue
                     level, heading_toc = toc_line.split(";")
-                    heading = heading.strip().replace("*", "")
+                    heading = heading_text.strip().replace("*", "")
                     if (SequenceMatcher(None, "contents", heading_toc.lower())).ratio() > 0.6:
                         toc_line = toc_file.readline()
                         level, heading_toc = toc_line.split(";")
