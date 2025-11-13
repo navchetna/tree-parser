@@ -37,39 +37,10 @@
 # Document Types
 This approach **should** work with documents that have an outline.
 
-# Setup
-
-## Clone repo
+# Installation
 ```bash
-git clone https://github.com/navchetna/ai-agents
+uv pip install git+https://github.com/navchetna/tree-parser.git
 ```
-
-## Move to the pdf-parser folder
-```bash
-cd ai-agents/input-handlers/pdf/pdf-parser
-```
-
-## Create and activate a virtual environment
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-## Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-## Run the program
-```bash
-python3 program.py filename.pdf
-```
----
-**NOTE**
-
-1. `filename.pdf` should be present in `pdfs` folder
-
-2. Please make sure to use WSL/Linux environment for running above
 
 ---
 
