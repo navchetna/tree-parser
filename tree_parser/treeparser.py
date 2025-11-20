@@ -255,9 +255,15 @@ class TreeParser:
         content = node.get_content()
         for item in content:
             if isinstance(item, Text):
-                data[heading]['content'].append(item.content)
+                data[heading]['content'].append({
+                    'type': 'text',
+                    'content': item.content
+                })
             if isinstance(item, Table):
-                data[heading]['content'].append(item.markdown_content)
+                data[heading]['content'].append({
+                    'type': 'table',
+                    'content': item.markdown_content
+                })
 
         data[heading]['children'] = []
         
