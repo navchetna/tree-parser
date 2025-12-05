@@ -8,3 +8,5 @@ toc.txt
 program.py
 get_content.sh
 get_memory.sh
+*.egg-info
+build/
