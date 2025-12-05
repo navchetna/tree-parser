@@ -163,11 +163,23 @@ class TreeParser:
                     if not toc_line:
                         line = markdown_file.readline()
                         continue
-                    level, heading_toc = toc_line.split(";")
+                    parts = toc_line.split(";", 1)
+                    if len(parts) < 2:
+                        logger.warning(f"Invalid TOC line format: {toc_line}")
+                        toc_line = toc_file.readline()
+                        continue
+                
+                    level, heading_toc = parts
                     heading = heading_text.strip().replace("*", "")
                     if (SequenceMatcher(None, "contents", heading_toc.lower())).ratio() > 0.6:
                         toc_line = toc_file.readline()
-                        level, heading_toc = toc_line.split(";")
+                        parts = toc_line.split(";", 1)
+                        if len(parts) < 2:
+                            logger.warning(f"Invalid TOC line format after contents skip: {toc_line!r}")
+                            toc_line = toc_file.readline()
+                            continue
+
+                        level, heading_toc = parts
                     elif SequenceMatcher(None, heading.lower(), heading_toc.lower()).ratio() > 0.6:
                         node = Node(level, heading, os.path.join(self.OUTPUT_DIR, filename))
                         if level > currNode.get_level():
