@@ -1,8 +1,9 @@
 import re
-import json 
+import json
 import os
 import logging
 from difflib import SequenceMatcher
+from typing import Optional
 
 from marker.output import output_exists, save_output
 from sortedcontainers import SortedDict
@@ -25,9 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 class TreeParser:
-    def __init__(self, user_param: str):
-        # User-specific output directory
-        self.OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
+    def __init__(self, user_param: str, output_dir: Optional[str] = None):
+        if output_dir:
+            self.OUTPUT_DIR = output_dir
+        else:
+            self.OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
         mkdirIfNotExists(self.OUTPUT_DIR)
 
     def get_filename(self, file):

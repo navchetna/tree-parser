@@ -9,16 +9,22 @@
 #         self.file = file
     
 import os
+from typing import Optional
+
 from tree_parser.node import Node
 
 class Tree:
-    def __init__(self, file, user_param: str):
-        output_dir = os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
-        os.makedirs(output_dir, exist_ok=True)
+    def __init__(self, file, user_param: str, output_dir: Optional[str] = None):
+        resolved_output_dir = (
+            output_dir
+            if output_dir
+            else os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
+        )
+        os.makedirs(resolved_output_dir, exist_ok=True)
 
         self.rootNode = Node(
-            '0', 
-            "root", 
-            os.path.join(output_dir, os.path.splitext(os.path.basename(file))[0])
+            "0",
+            "root",
+            os.path.join(resolved_output_dir, os.path.splitext(os.path.basename(file))[0]),
         )
         self.file = file
