@@ -92,7 +92,7 @@ class TreeParser:
                     for i in list_headings:
                         if size - 1 > i[0]:
                             i[1] += 1
-                if idx == -1:
+                if idx == -1: 
                     idx = size
                     dictLevel[size] = prevLevel + 1
                 lis = [idx, dictLevel[idx], heading['title']]
