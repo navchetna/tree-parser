@@ -12,8 +12,8 @@ import os
 from tree_parser.node import Node
 
 class Tree:
-    def __init__(self, file, user_param: str):
-        output_dir = os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
+    def __init__(self, file, user_param: str, output_dir: str = None):
+        output_dir = os.path.join(output_dir if output_dir else os.path.expanduser("~"), user_param)
         os.makedirs(output_dir, exist_ok=True)
 
         self.rootNode = Node(

@@ -23,12 +23,12 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
 class TreeParser:
-    def __init__(self, user_param: str):
+    def __init__(self, user_param: str, output_dir: str = None):
         # User-specific output directory
-        self.OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "pdf-results", user_param, "outputs")
+        self.OUTPUT_DIR = os.path.join(output_dir if output_dir else os.path.expanduser("~"), user_param)
         mkdirIfNotExists(self.OUTPUT_DIR)
+        print(f"Initialized TreeParser with output directory: {self.OUTPUT_DIR}")
 
     def get_filename(self, file):
         return os.path.splitext(os.path.basename(file))[0]
@@ -37,7 +37,7 @@ class TreeParser:
         if not output_exists(os.path.join(self.OUTPUT_DIR, filename), filename):
             rendered = converter(file)
             output_path = os.path.join(self.OUTPUT_DIR, filename)
-            os.mkdir(output_path)
+            os.makedirs(output_path, exist_ok=True)
             save_output(rendered, output_path, filename)
             logger.info(f"Saved markdown to {output_path}")
 
@@ -251,10 +251,12 @@ class TreeParser:
         
     def generate_output_text(self, tree):
         filename = self.get_filename(tree.file)
-        with open(os.path.join(self.OUTPUT_DIR, filename, "output.txt"), "w") as f:
+        output_path = os.path.join(self.OUTPUT_DIR, filename, "output.txt")
+        with open(output_path, "w") as f:
             f.write("")
         self.traverse_tree_text(tree.rootNode)
-
+        return output_path
+    
     def traverse_tree_json(self, node):
         if node is None:
             return
@@ -293,6 +295,7 @@ class TreeParser:
         with open(output_path, "w") as outfile: 
             json.dump(data, outfile)
         logger.info(f"Saved JSON tree to {output_path}")
+        return output_path
 
     def populate_tree(self, tree, converter):
         rootNode = tree.rootNode
