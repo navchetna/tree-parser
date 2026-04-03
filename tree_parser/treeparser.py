@@ -3,11 +3,15 @@ import json
 import os
 import logging
 from difflib import SequenceMatcher
+from pathlib import Path
 
-from marker.output import output_exists, save_output
 from sortedcontainers import SortedDict
-from pdfminer.pdfparser import PDFParser, PDFSyntaxError
-from pdfminer.pdfdocument import PDFDocument, PDFNoOutlines
+
+from docling.datamodel.base_models import ConversionStatus, InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
+from docling.datamodel.document import DocItemLabel
 
 from tree_parser.node import Node
 from tree_parser.text import Text
@@ -23,6 +27,134 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+_LEVEL_PATTERN = re.compile(r"^\d+(\.\d+)*\.?\s")
+
+
+def _convert_with_docling(pdf_path: Path):
+    pipeline_options = PdfPipelineOptions(
+        do_ocr=False,
+        do_table_structure=False,
+    )
+    doc_converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(
+                pipeline_cls=StandardPdfPipeline,
+                pipeline_options=pipeline_options,
+            ),
+        }
+    )
+    result = doc_converter.convert(pdf_path)
+    assert result.status == ConversionStatus.SUCCESS, f"Docling conversion failed: {result.status}"
+    return result.document
+
+
+def _collect_headings(doc) -> list[dict]:
+    heading_labels = {DocItemLabel.TITLE, DocItemLabel.SECTION_HEADER}
+    headings = []
+
+    for item, _ in doc.iterate_items():
+        if item.label not in heading_labels:
+            continue
+
+        page = item.prov[0].page_no if item.prov else None
+
+        bbox = item.prov[0].bbox if item.prov else None
+        height = None
+        if bbox is not None:
+            try:
+                height = abs(bbox.t - bbox.b)
+            except AttributeError:
+                try:
+                    coords = list(bbox)
+                    height = abs(coords[2][1] - coords[0][1])
+                except Exception:
+                    height = None
+
+        headings.append({
+            "title": item.text.replace("\n", " "),
+            "page": page,
+            "height": height,
+        })
+
+    return headings
+
+
+def _toc_from_numbered_headings(headings: list[dict]) -> list[dict]:
+    toc = []
+    for h in headings:
+        if not _LEVEL_PATTERN.match(h["title"]):
+            continue
+        number, _ = h["title"].split(" ", 1)
+        level = number.count(".") + 1
+        toc.append({"level": level, "title": h["title"], "page": h.get("page")})
+    return toc
+
+
+def _toc_from_size(headings: list[dict]) -> list[dict]:
+    dict_level: SortedDict = SortedDict()
+    list_headings = []
+
+    for h in headings:
+        if h["height"] is None:
+            continue
+
+        size = round(h["height"])
+        idx = -1
+        prev_level = 0
+        size_lesser_found = False
+
+        for key in reversed(dict_level):
+            if size == key or size - 1 == key:
+                idx = key
+                break
+            if size - 1 > key:
+                prev_level = dict_level[key] - 1
+                size_lesser_found = True
+                break
+            prev_level = dict_level[key]
+
+        if size_lesser_found:
+            for key in reversed(dict_level):
+                if size - 1 > key:
+                    dict_level[key] += 1
+            for entry in list_headings:
+                if size - 1 > entry[0]:
+                    entry[1] += 1
+
+        if idx == -1:
+            idx = size
+            dict_level[size] = prev_level + 1
+
+        list_headings.append([idx, dict_level[idx], h["title"], h.get("page")])
+
+    return [{"level": e[1], "title": e[2], "page": e[3]} for e in list_headings]
+
+
+def extract_toc(pdf_path: Path) -> list[dict]:
+    logger.info("Running docling standard pipeline to extract headings \u2026")
+    doc = _convert_with_docling(pdf_path)
+    headings = _collect_headings(doc)
+
+    if not headings:
+        logger.warning("No headings detected by docling.")
+        return []
+
+    if any(_LEVEL_PATTERN.match(h["title"]) for h in headings):
+        logger.info("Using numbered-heading level detection.")
+        return _toc_from_numbered_headings(headings)
+    else:
+        logger.info("Using bounding-box size level detection.")
+        return _toc_from_size(headings)
+
+
+def save_toc(toc: list[dict], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        for entry in toc:
+            f.write(f"{entry['level']};{entry['title']}\n")
+    logger.info("Saved TOC to %s", output_path)
+
+
 class TreeParser:
     def __init__(self, user_param: str, output_dir: str = None):
         # User-specific output directory
@@ -32,103 +164,6 @@ class TreeParser:
 
     def get_filename(self, file):
         return os.path.splitext(os.path.basename(file))[0]
-
-    def generate_markdown(self, file, filename, converter):
-        if not output_exists(os.path.join(self.OUTPUT_DIR, filename), filename):
-            rendered = converter(file)
-            output_path = os.path.join(self.OUTPUT_DIR, filename)
-            os.makedirs(output_path, exist_ok=True)
-            save_output(rendered, output_path, filename)
-            logger.info(f"Saved markdown to {output_path}")
-
-    def detect_level(self, headings):
-        level_pattern = re.compile(r'^\d+(\.\d+)*\.?\s')
-        for heading in headings:
-            if level_pattern.match(heading['title']):
-                return True
-        return False
-    
-    def generate_toc_using_level(self, filename, headings):
-        output_path = os.path.join(self.OUTPUT_DIR, filename, 'toc.txt')
-        with open(output_path, 'w') as file_toc:
-
-            level_pattern = re.compile(r'^\d+(\.\d+)*\.?\s')
-
-            for heading in headings:
-                if level_pattern.match(heading['title']):
-                    heading['title'] = heading['title'].replace("\n", " ")
-                    heading_number, title = heading['title'].split(" ", 1)
-                    level = heading_number.count(".") + 1
-                    file_toc.write(f"{level};{heading['title']}\n")
-        logger.info(f"Saved TOC to {output_path}")
-
-    def generate_toc_using_size(self, filename, headings):
-        with open(os.path.join(self.OUTPUT_DIR, filename, 'toc.txt'), 'w') as file:
-            dictLevel = SortedDict()
-            list_headings = []
-
-            for heading in headings:
-                size = round(heading['polygon'][2][1] - heading['polygon'][0][1])
-                heading['title'] = heading['title'].replace("\n", " ")
-                idx = -1
-                prevLevel = 0
-                sizeLesserFound = False
-                for key in reversed(dictLevel):
-                    if size == key or size - 1 == key:
-                        idx = key
-                        break
-                    if size - 1 > key:
-                        prevLevel = dictLevel[key] - 1
-                        sizeLesserFound = True
-                        break
-                    prevLevel = dictLevel[key]
-                if sizeLesserFound:
-                    for key in reversed(dictLevel):
-                        if size - 1 > key:
-                            dictLevel[key] += 1
-                    for i in list_headings:
-                        if size - 1 > i[0]:
-                            i[1] += 1
-                if idx == -1:
-                    idx = size
-                    dictLevel[size] = prevLevel + 1
-                lis = [idx, dictLevel[idx], heading['title']]
-                list_headings.append(lis)
-
-            for i in list_headings:
-                file.write(f"{i[1]};{i[2]};;;\n")
-
-    def generate_toc_no_outline(self, filename):
-        with open(os.path.join(self.OUTPUT_DIR, filename, filename + "_meta.json"), 'r') as file_meta:
-            data = json.load(file_meta)
-
-        headings = data['table_of_contents']
-        
-        if not headings:
-            logger.warning("No headings detected in PDF: %s", filename)
-            return
-        if self.detect_level(headings):
-            self.generate_toc_using_level(filename, headings)
-        else:
-            self.generate_toc_using_size(filename, headings)        
-    
-    def generate_toc(self, file, filename):
-        if "grade" in filename:
-            return
-        with open(os.path.join(self.OUTPUT_DIR, filename, 'toc.txt'), 'w') as file_toc:
-            with open(file, "rb") as fp:
-                try:
-                    parser = PDFParser(fp)
-                    document = PDFDocument(parser)
-                    outlines = document.get_outlines()
-                    for (level, title, dest, a, se) in outlines:
-                        file_toc.write(f"{level};{title}\n")
-                except PDFNoOutlines:
-                    self.generate_toc_no_outline(filename)
-                except PDFSyntaxError:
-                    logger.info("Corrupted PDF or non-PDF file.")
-                finally:
-                    parser.close()
 
     def peek_next_lines(self, f):
         pos = f.tell()
@@ -297,12 +332,14 @@ class TreeParser:
         logger.info(f"Saved JSON tree to {output_path}")
         return output_path
 
-    def populate_tree(self, tree, converter):
+    def populate_tree(self, tree):
         rootNode = tree.rootNode
         file = tree.file
         filename = self.get_filename(file)
-        self.generate_markdown(file, filename, converter)
-        self.generate_toc(file, filename)
+
+        toc = extract_toc(Path(file))
+        toc_path = Path(os.path.join(self.OUTPUT_DIR, filename, 'toc.txt'))
+        save_toc(toc, toc_path)
 
         recentNodeDict = {}
         recentNodeDict['0'] = rootNode
