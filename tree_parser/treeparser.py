@@ -12,6 +12,7 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
 from docling.datamodel.document import DocItemLabel
+from docling_core.types.doc import PictureItem
 
 from tree_parser.node import Node
 from tree_parser.text import Text
@@ -153,6 +154,52 @@ def save_toc(toc: list[dict], output_path: Path) -> None:
         for entry in toc:
             f.write(f"{entry['level']};{entry['title']}\n")
     logger.info("Saved TOC to %s", output_path)
+
+
+def extract_figures(pdf_path: Path, output_dir: Path) -> dict[int, list[Path]]:
+    """Run the standard PdfPipeline to extract all figures/pictures from a PDF."""
+    logger.info("Running standard pipeline for figure extraction \u2026")
+
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.images_scale = 2.0
+    pipeline_options.generate_picture_images = True
+
+    doc_converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+        }
+    )
+    conv_result = doc_converter.convert(pdf_path)
+
+    saved: dict[int, list[Path]] = {}
+    picture_counter = 0
+
+    for element, _level in conv_result.document.iterate_items():
+        if not isinstance(element, PictureItem):
+            continue
+        if not element.prov:
+            continue
+
+        page_no = element.prov[0].page_no
+        picture_counter += 1
+
+        pil_img = element.get_image(conv_result.document)
+        if pil_img is None or pil_img.width == 0 or pil_img.height == 0:
+            logger.debug("Skipping empty image for picture %d on page %d", picture_counter, page_no)
+            continue
+
+        page_dir = output_dir / "figures" / f"page_{page_no}"
+        page_dir.mkdir(parents=True, exist_ok=True)
+
+        img_path = page_dir / f"figure_{picture_counter}.png"
+        with img_path.open("wb") as fp:
+            pil_img.save(fp, "PNG")
+
+        saved.setdefault(page_no, []).append(img_path)
+        logger.info("Saved figure (page %d) \u2192 %s", page_no, img_path)
+
+    logger.info("Saved %d figure(s) across %d page(s)", sum(len(v) for v in saved.values()), len(saved))
+    return saved
 
 
 class TreeParser:
@@ -332,7 +379,7 @@ class TreeParser:
         logger.info(f"Saved JSON tree to {output_path}")
         return output_path
 
-    def populate_tree(self, tree):
+    def populate_tree(self, tree, extract_images: bool = False):
         rootNode = tree.rootNode
         file = tree.file
         filename = self.get_filename(file)
@@ -345,6 +392,10 @@ class TreeParser:
         recentNodeDict['0'] = rootNode
 
         self.parse_markdown(filename, rootNode, recentNodeDict)
+
+        if extract_images:
+            figures_dir = Path(os.path.join(self.OUTPUT_DIR, filename))
+            extract_figures(Path(file), figures_dir)
     
     def get_output_path(self, tree):
         filename = self.get_filename(tree.file)
