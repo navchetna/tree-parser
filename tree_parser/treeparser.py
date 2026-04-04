@@ -31,11 +31,15 @@ logger = logging.getLogger(__name__)
 _LEVEL_PATTERN = re.compile(r"^\d+(\.\d+)*\.?\s")
 
 
-def _convert_with_docling(pdf_path: Path):
+def _convert_with_docling(pdf_path: Path, extract_images: bool = False):
     pipeline_options = PdfPipelineOptions(
         do_ocr=False,
         do_table_structure=False,
     )
+    if extract_images:
+        pipeline_options.images_scale = 2.0
+        pipeline_options.generate_picture_images = True
+
     doc_converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(
@@ -46,7 +50,7 @@ def _convert_with_docling(pdf_path: Path):
     )
     result = doc_converter.convert(pdf_path)
     assert result.status == ConversionStatus.SUCCESS, f"Docling conversion failed: {result.status}"
-    return result.document
+    return result
 
 
 def _collect_headings(doc) -> list[dict]:
@@ -131,21 +135,28 @@ def _toc_from_size(headings: list[dict]) -> list[dict]:
     return [{"level": e[1], "title": e[2], "page": e[3]} for e in list_headings]
 
 
-def extract_toc(pdf_path: Path) -> list[dict]:
-    logger.info("Running docling standard pipeline to extract headings \u2026")
-    doc = _convert_with_docling(pdf_path)
-    headings = _collect_headings(doc)
-
+def _headings_to_toc(headings: list[dict]) -> list[dict]:
     if not headings:
-        logger.warning("No headings detected by docling.")
         return []
-
     if any(_LEVEL_PATTERN.match(h["title"]) for h in headings):
         logger.info("Using numbered-heading level detection.")
         return _toc_from_numbered_headings(headings)
     else:
         logger.info("Using bounding-box size level detection.")
         return _toc_from_size(headings)
+
+
+def extract_toc(pdf_path: Path) -> list[dict]:
+    """Extract TOC from a PDF (lightweight single-purpose call)."""
+    logger.info("Running docling standard pipeline to extract headings \u2026")
+    conv_result = _convert_with_docling(pdf_path)
+    headings = _collect_headings(conv_result.document)
+
+    if not headings:
+        logger.warning("No headings detected by docling.")
+        return []
+
+    return _headings_to_toc(headings)
 
 
 def save_toc(toc: list[dict], output_path: Path) -> None:
@@ -156,20 +167,11 @@ def save_toc(toc: list[dict], output_path: Path) -> None:
     logger.info("Saved TOC to %s", output_path)
 
 
-def extract_figures(pdf_path: Path, output_dir: Path) -> dict[int, list[Path]]:
-    """Run the standard PdfPipeline to extract all figures/pictures from a PDF."""
-    logger.info("Running standard pipeline for figure extraction \u2026")
-
-    pipeline_options = PdfPipelineOptions()
-    pipeline_options.images_scale = 2.0
-    pipeline_options.generate_picture_images = True
-
-    doc_converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-        }
-    )
-    conv_result = doc_converter.convert(pdf_path)
+def extract_figures(pdf_path: Path, output_dir: Path, conv_result=None) -> dict[int, list[Path]]:
+    """Extract all figures/pictures from a PDF. Uses conv_result if provided, otherwise runs a new conversion."""
+    if conv_result is None:
+        logger.info("Running standard pipeline for figure extraction \u2026")
+        conv_result = _convert_with_docling(pdf_path, extract_images=True)
 
     saved: dict[int, list[Path]] = {}
     picture_counter = 0
@@ -200,6 +202,23 @@ def extract_figures(pdf_path: Path, output_dir: Path) -> dict[int, list[Path]]:
 
     logger.info("Saved %d figure(s) across %d page(s)", sum(len(v) for v in saved.values()), len(saved))
     return saved
+
+
+def process_pdf(pdf_path: Path, output_dir: Path, extract_images: bool = True) -> tuple[list[dict], dict[int, list[Path]]]:
+    """Single docling pass: extract TOC and optionally figures from a PDF."""
+    logger.info("Running docling standard pipeline (single pass) \u2026")
+    conv_result = _convert_with_docling(pdf_path, extract_images=extract_images)
+
+    headings = _collect_headings(conv_result.document)
+    toc = _headings_to_toc(headings) if headings else []
+    if not headings:
+        logger.warning("No headings detected by docling.")
+
+    figures: dict[int, list[Path]] = {}
+    if extract_images:
+        figures = extract_figures(pdf_path, output_dir, conv_result=conv_result)
+
+    return toc, figures
 
 
 class TreeParser:
@@ -379,23 +398,24 @@ class TreeParser:
         logger.info(f"Saved JSON tree to {output_path}")
         return output_path
 
-    def populate_tree(self, tree, extract_images: bool = False):
+    def populate_tree(self, tree, toc: list[dict] = None, extract_images: bool = False):
         rootNode = tree.rootNode
         file = tree.file
         filename = self.get_filename(file)
+        file_dir = Path(os.path.join(self.OUTPUT_DIR, filename))
 
-        toc = extract_toc(Path(file))
-        toc_path = Path(os.path.join(self.OUTPUT_DIR, filename, 'toc.txt'))
-        save_toc(toc, toc_path)
+        if toc is None:
+            if extract_images:
+                toc, _ = process_pdf(Path(file), file_dir, extract_images=True)
+            else:
+                toc = extract_toc(Path(file))
+
+        save_toc(toc, file_dir / 'toc.txt')
 
         recentNodeDict = {}
         recentNodeDict['0'] = rootNode
 
         self.parse_markdown(filename, rootNode, recentNodeDict)
-
-        if extract_images:
-            figures_dir = Path(os.path.join(self.OUTPUT_DIR, filename))
-            extract_figures(Path(file), figures_dir)
     
     def get_output_path(self, tree):
         filename = self.get_filename(tree.file)
