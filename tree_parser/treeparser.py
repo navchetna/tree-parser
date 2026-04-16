@@ -241,11 +241,45 @@ class TreeParser:
     def parse_markdown(self, filename, rootNode, recentNodeDict):
         toc_file = open(os.path.join(self.OUTPUT_DIR, filename, "toc.txt"), "r")
         toc_line = toc_file.readline()
+        use_markdown_headings = not bool(toc_line)
                 
         currNode = rootNode
-        tables = []
         content = ""
         previous_line = ""
+
+        def level_value(level):
+            try:
+                return int(level)
+            except (TypeError, ValueError):
+                return 0
+
+        def flush_text():
+            nonlocal content
+            if content:
+                currNode.append_content(Text(content, currNode))
+                content = ""
+
+        def attach_node(level, heading):
+            nonlocal currNode
+
+            node_level = level_value(level)
+            node = Node(node_level, heading, os.path.join(self.OUTPUT_DIR, filename))
+
+            parent_level = 0
+            for existing_level in sorted(recentNodeDict.keys(), reverse=True):
+                if level_value(existing_level) < node_level:
+                    parent_level = existing_level
+                    break
+
+            parent = recentNodeDict[parent_level]
+            parent.append_child(node)
+            node.set_parent(parent)
+
+            for existing_level in list(recentNodeDict.keys()):
+                if level_value(existing_level) >= node_level:
+                    del recentNodeDict[existing_level]
+            recentNodeDict[node_level] = node
+            currNode = node
 
         with open(os.path.join(self.OUTPUT_DIR, filename, filename + ".md"), 'r') as markdown_file:
             line = markdown_file.readline()
@@ -259,53 +293,42 @@ class TreeParser:
                 heading_regex = re.compile(r'^(#{1,6})\s+(.+)')
                 match = heading_regex.match(line)
                 if match:
-                    heading_level = len(match.group(1))
+                    heading_level = level_value(len(match.group(1)))
                     heading_text = match.group(2).strip()
-                    if not toc_line:
-                        line = markdown_file.readline()
-                        continue
-                    parts = toc_line.split(";", 1)
-                    if len(parts) < 2:
-                        logger.warning(f"Invalid TOC line format: {toc_line}")
-                        toc_line = toc_file.readline()
-                        continue
-                
-                    level, heading_toc = parts
                     heading = heading_text.strip().replace("*", "")
-                    if (SequenceMatcher(None, "contents", heading_toc.lower())).ratio() > 0.6:
-                        toc_line = toc_file.readline()
+
+                    if use_markdown_headings:
+                        flush_text()
+                        attach_node(heading_level, heading)
+                    else:
                         parts = toc_line.split(";", 1)
                         if len(parts) < 2:
-                            logger.warning(f"Invalid TOC line format after contents skip: {toc_line!r}")
+                            logger.warning(f"Invalid TOC line format: {toc_line}")
                             toc_line = toc_file.readline()
                             continue
 
                         level, heading_toc = parts
-                    elif SequenceMatcher(None, heading.lower(), heading_toc.lower()).ratio() > 0.6:
-                        node = Node(level, heading, os.path.join(self.OUTPUT_DIR, filename))
-                        if level > currNode.get_level():
-                            currNode.append_child(node)
-                            node.set_parent(currNode)
+                        if (SequenceMatcher(None, "contents", heading_toc.lower())).ratio() > 0.6:
+                            toc_line = toc_file.readline()
+                            parts = toc_line.split(";", 1)
+                            if len(parts) < 2:
+                                logger.warning(f"Invalid TOC line format after contents skip: {toc_line!r}")
+                                toc_line = toc_file.readline()
+                                continue
+
+                            level, heading_toc = parts
+
+                        if SequenceMatcher(None, heading.lower(), heading_toc.lower()).ratio() > 0.6:
+                            flush_text()
+                            attach_node(level, heading)
+                            toc_line = toc_file.readline()
                         else:
-                            parent_key = -1
-                            for key in reversed(recentNodeDict):
-                                if key < node.get_level():
-                                    parent_key = key
-                                    break
-                            recentNodeDict[parent_key].append_child(node)
-                            node.set_parent(recentNodeDict[parent_key])
-                            recentNodeDict[node.get_level()] = node
-                        text_obj = Text(content, currNode)
-                        currNode.append_content(text_obj)
-                        for table in tables:
-                            currNode.append_content(table)
-                        tables.clear()
-                        content = ""
-                        currNode = node
-                        toc_line = toc_file.readline()  
-                    else:
-                        content += line    
+                            content += line
+                            previous_line = line
+                            line = markdown_file.readline()
+                            continue
                 elif line[0] == '|':
+                    flush_text()
                     table_list = [line]
                     while self.peek_next_lines(markdown_file)[0] and self.peek_next_lines(markdown_file)[0][0] == '|':
                         line = markdown_file.readline()
@@ -324,7 +347,7 @@ class TreeParser:
                     elif match_table_heading_next:
                         heading = next_line
                     table_obj = Table("".join(table_list), heading, currNode)
-                    tables.append(table_obj)
+                    currNode.append_content(table_obj)
                 else:
                     pattern_heading = re.compile(r'^(Table|Figure)\s+(\d+)', re.IGNORECASE)
                     match_heading = pattern_heading.search(line)
@@ -333,10 +356,7 @@ class TreeParser:
                 previous_line = line
                 line = markdown_file.readline()
                 if not line:
-                    text_obj = Text(content, currNode)
-                    currNode.append_content(text_obj)
-                    for table in tables:
-                        currNode.append_content(table)
+                    flush_text()
 
         if toc_file.readline():
             logger.warning("PDF not parsed accurately")
@@ -413,7 +433,7 @@ class TreeParser:
         save_toc(toc, file_dir / 'toc.txt')
 
         recentNodeDict = {}
-        recentNodeDict['0'] = rootNode
+        recentNodeDict[0] = rootNode
 
         self.parse_markdown(filename, rootNode, recentNodeDict)
     

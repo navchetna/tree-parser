@@ -8,6 +8,7 @@ A Python package for extracting structured content from PDF documents. It uses [
 - **Figure extraction** — Extracts all figures/pictures from the PDF, saved as PNGs organized by page number.
 - **Single-pass processing** — `process_pdf()` runs Docling once to extract both TOC and figures, avoiding redundant PDF conversions.
 - **Tree construction** — Parses a Markdown file against the TOC to build a tree of nodes (headings → content → children).
+- **Markdown fallback** — If Docling does not detect headings and `toc.txt` is empty, the parser falls back to Markdown headings.
 - **Output generation** — Produces `output_tree.json`, `output.txt`, `figures`, `toc.txt`.
 
 ## Output Structure
