@@ -301,15 +301,40 @@ class TreeParser:
                         flush_text()
                         attach_node(heading_level, heading)
                     else:
+                        # Skip blank lines in the TOC file.
+                        while toc_line and not toc_line.strip():
+                            toc_line = toc_file.readline()
+
+                        # TOC exhausted before the markdown ran out of
+                        # headings — fall back to markdown-heading mode for
+                        # the rest of the document instead of warning on
+                        # every remaining heading.
+                        if not toc_line:
+                            use_markdown_headings = True
+                            flush_text()
+                            attach_node(heading_level, heading)
+                            previous_line = line
+                            line = markdown_file.readline()
+                            continue
+
                         parts = toc_line.split(";", 1)
                         if len(parts) < 2:
-                            logger.warning(f"Invalid TOC line format: {toc_line}")
+                            logger.warning(f"Invalid TOC line format: {toc_line!r}")
                             toc_line = toc_file.readline()
                             continue
 
                         level, heading_toc = parts
                         if (SequenceMatcher(None, "contents", heading_toc.lower())).ratio() > 0.6:
                             toc_line = toc_file.readline()
+                            while toc_line and not toc_line.strip():
+                                toc_line = toc_file.readline()
+                            if not toc_line:
+                                use_markdown_headings = True
+                                flush_text()
+                                attach_node(heading_level, heading)
+                                previous_line = line
+                                line = markdown_file.readline()
+                                continue
                             parts = toc_line.split(";", 1)
                             if len(parts) < 2:
                                 logger.warning(f"Invalid TOC line format after contents skip: {toc_line!r}")
